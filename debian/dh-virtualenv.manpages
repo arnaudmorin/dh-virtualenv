@@ -1,1 +1,2 @@
-doc/dh_virtualenv.1
+# Uncomment this line if doc is built
+#doc/dh_virtualenv.1
