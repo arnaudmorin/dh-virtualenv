@@ -22,7 +22,7 @@ self-contained virtualenv based Python deployments.
 The idea behind dh-virtualenv is to be able to combine the power of
 Debian packaging with the sandboxed nature of virtualenvs. In addition
 to this, using virtualenv enables installing requirements via
-[Python Package Index](http://pypi.python.org) instead of relying on
+[Python Package Index](https://pypi.org) instead of relying on
 the operating system provided Python packages. The only limiting
 factor is that you have to run the same Python interpreter as the
 operating system.
@@ -98,6 +98,20 @@ invoke docs
 
 To **start a watchdog that auto-rebuilds documentation** and reloads the opened browser tab on any change,
 call ``invoke docs -w -b`` (stop the watchdog using the ``-k`` option).
+
+
+## Releasing a new version
+
+Follow these steps when creating a new release:
+
+1. Check version in `dh_virtualenv/_version.py` and `debian/changelog`.
+1. Make sure `doc/changes.rst` is complete.
+1. Sync `debian/changelog` with `doc/changes.rst`.
+1. Tag the release and `git push --tags`.
+1. Edit release entry on GitHub (add changes).
+1. Bump to next release version in `dh_virtualenv/_version.py`.
+1. Open new section in `debian/changelog` (with `…-0.1+dev` added).
+1. Open a new section in `doc/changes.rst`, so it can be maintained as features are added!
 
 
 ## Code of conduct

@@ -34,6 +34,7 @@ class Deployment(object):
                  package,
                  extra_urls=[],
                  preinstall=[],
+                 extras=[],
                  pip_tool='pip',
                  upgrade_pip=False,
                  index_url=None,
@@ -67,6 +68,7 @@ class Deployment(object):
         self.local_bin_dir = os.path.join(self.package_dir, 'local', 'bin')
 
         self.preinstall = preinstall
+        self.extras = extras
         self.upgrade_pip = upgrade_pip
         self.extra_virtualenv_arg = extra_virtualenv_arg
         self.log_file = tempfile.NamedTemporaryFile()
@@ -107,6 +109,7 @@ class Deployment(object):
         return cls(package,
                    extra_urls=options.extra_index_url,
                    preinstall=options.preinstall,
+                   extras=options.extras,
                    pip_tool=options.pip_tool,
                    upgrade_pip=options.upgrade_pip,
                    index_url=options.index_url,
@@ -126,6 +129,7 @@ class Deployment(object):
         shutil.rmtree(self.debian_root)
 
     def create_virtualenv(self):
+        # Specify interpreter and virtual environment options
         if self.builtin_venv:
             virtualenv = [self.python, '-m', 'venv']
         else:
@@ -145,12 +149,21 @@ class Deployment(object):
             if self.python:
                 virtualenv.extend(('--python', self.python))
 
-            # Add in any user supplied pip args
-            if self.extra_virtualenv_arg:
-                virtualenv.extend(self.extra_virtualenv_arg)
+        # Add in any user supplied virtualenv args
+        if self.extra_virtualenv_arg:
+            virtualenv.extend(self.extra_virtualenv_arg)
 
         virtualenv.append(self.package_dir)
         subprocess.check_call(virtualenv)
+
+        # Due to Python bug https://bugs.python.org/issue24875
+        # venv doesn't bootstrap pip/setuptools in the virtual
+        # environment with --system-site-packages .
+        # The workaround is to reconfigure it with this option
+        # after it has been created.
+        if self.builtin_venv and self.use_system_packages:
+            virtualenv.append('--system-site-packages')
+            subprocess.check_call(virtualenv)
 
     def venv_bin(self, binary_name):
         return os.path.abspath(os.path.join(self.bin_dir, binary_name))
@@ -184,12 +197,13 @@ class Deployment(object):
 
     def find_script_files(self):
         """Find list of files containing python shebangs in the bin directory"""
-        command = ['grep', '-l', '-r', '-e',
-                   r'^#!.*bin/\(env \)\?{0}'.format(_PYTHON_INTERPRETERS_REGEX),
+        command = ['grep', '-l', '-r',
+                   '-e', r'^#!.*bin/\(env \)\?{0}'.format(_PYTHON_INTERPRETERS_REGEX),
+                   '-e', r"^'''exec.*bin/{0}".format(_PYTHON_INTERPRETERS_REGEX),
                    self.bin_dir]
         grep_proc = subprocess.Popen(command, stdout=subprocess.PIPE)
         files, stderr = grep_proc.communicate()
-        return files.decode('utf-8').strip().split('\n')
+        return set(f for f in files.decode('utf-8').strip().split('\n') if f)
 
     def fix_shebangs(self):
         """Translate /usr/bin/python and /usr/bin/env python shebang
@@ -197,8 +211,14 @@ class Deployment(object):
         """
         pythonpath = os.path.join(self.virtualenv_install_dir, 'bin/python')
         for f in self.find_script_files():
-            regex = r's-^#!.*bin/\(env \)\?{names}\"\?-#!{pythonpath}-'\
-                .format(names=_PYTHON_INTERPRETERS_REGEX, pythonpath=re.escape(pythonpath))
+            regex = (r's-^#!.*bin/\(env \)\?{names}\"\?-#!{pythonpath}-;'
+                     r"s-^'''exec'.*bin/{names}-'''exec' {pythonpath}-"
+            ).format(names=_PYTHON_INTERPRETERS_REGEX, pythonpath=re.escape(pythonpath))
+            p = subprocess.Popen(
+                ['sed', '-i', regex, f],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
             subprocess.check_call(['sed', '-i', regex, f])
 
     def fix_activate_path(self):
@@ -236,7 +256,8 @@ class Deployment(object):
 
     def install_package(self):
         if not self.skip_install:
-            subprocess.check_call(self.pip('.'), cwd=os.path.abspath(self.sourcedirectory))
+            package = '.[{}]'.format(','.join(self.extras)) if self.extras else '.'
+            subprocess.check_call(self.pip(package), cwd=os.path.abspath(self.sourcedirectory))
 
     def fix_local_symlinks(self):
         # The virtualenv might end up with a local folder that points outside the package
